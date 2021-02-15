@@ -1,0 +1,108 @@
+---
+title: "COVID_EDA"
+author: "Shiyu Ma-Team Sentiment"
+date: "2/7/2021"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    highlight: github
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+merged_data <- read_csv("merged_data.csv")
+Mydata<-merged_data %>% select(user_name,user_location,user_followers,date,text,hashtags) %>%
+  distinct(text, .keep_all = TRUE)
+```
+
+```{r}
+# Get the text column
+text <- Mydata$text
+
+# Set the text to lowercase
+text <- tolower(text)
+text[c(0:15)]
+# Remove urls, hashtag,  mentions, emojis, extrawhite space
+temp <- gsub("https://.+", "", text)
+temp <- gsub("#\\w+", "", temp)
+temp <- gsub("@\\w+", "", temp)
+temp <- gsub("\\n", "", temp)
+temp <- gsub("amp", " ", temp)
+#remove all characters that are not (^) in the range \x20-\x7E (hex 0x20 to 0x7E)
+temp <- gsub("[^\x20-\x7E]", "", temp)
+
+temp <- gsub("[[:punct:]]", " ", temp)
+#remove extrawhite spaces
+temp <- gsub("\\s+"," ",temp)
+temp <- gsub("^\\s+", "", temp)
+
+temp[c(0:15)]
+
+```
+```{r}
+temp1<-unlist(strsplit(temp," "))
+temp1[c(0:60)]
+```
+
+```{r}
+library(tm)
+library(stringi)
+badwords<-c("the","a","were","was","you","are", "his","is","over","they","their", "i","after","on","to","into","them","re","ve","been","has","have","of","for","does","it","and","will","could","in","this","those","there","be","is","as","also","its","us","some","here","from","any","did","we","me","may","that","with","your","our","can","about","would","being","these","during","had","since","which","when","what","how","why","who","while","not","just")
+temp2<-removeWords(temp1, badwords)
+word<-stri_omit_empty(temp2, na_empty = FALSE)
+word[c(0:20)]
+```
+```{r}
+tf<-termFreq(word)
+freq<-data.frame(fq=findMostFreqTerms(tf,n=100))
+wordfq<-tibble::rownames_to_column(freq, "word")
+word_frame<-data.frame(word)
+```
+
+```{r}
+library(tidytext)
+sentiment <- word_frame %>%
+      inner_join(get_sentiments("bing"))
+positive<-sentiment %>% filter(sentiment == "positive") %>%
+  count(word, sort = TRUE)
+head(positive)
+positive1<-positive %>% filter(word != "trump" & word != "positive")
+negative<-sentiment %>% filter(sentiment == "negative") %>%
+  count(word, sort = TRUE)
+head(negative)
+negative1<-negative %>% filter(word != "negative")
+```
+
+```{r}
+#install.packages("wordcloud")
+library(wordcloud)
+wordcloud(words = wordfq$word, freq = wordfq$fq,max.words=200, random.order=FALSE, rot.per=0.15,colors=brewer.pal(8, "Dark2"))
+wordcloud(words = positive1$word, freq = positive$n,max.words=100 ,random.order=FALSE, rot.per=0.15,colors=brewer.pal(8, "Dark2"))
+wordcloud(words = negative1$word, freq = negative$n,max.words=100, random.order=FALSE, rot.per=0.15,colors=brewer.pal(8, "Dark2"))
+```
+
+```{r}
+#character limit=115
+length(unlist(strsplit("while the world has been on the wrong side of history this year, hopefully, the biggest vaccination effort we've ev",split="")))
+#https://developer.twitter.com/en/docs/twitter-api/early-access
+#https://towardsdatascience.com/setting-up-twitter-for-text-mining-in-r-bcfc5ba910f4
+
+```
+```{r}
+Myloc<-Mydata %>% na.omit(user_location)
+loc <- Myloc$user_location
+loc[c(0:40)]
+loctemp <- gsub("[^\x20-\x7E]", "", loc)
+loctemp <- gsub("[[:punct:]]", " ", loctemp)
+loctemp <- gsub("\\s+"," ",loctemp)
+loctemp[c(0:40)]
+```
