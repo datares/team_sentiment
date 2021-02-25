@@ -1,0 +1,275 @@
+---
+title: "COVID_EDA"
+author: "Shiyu Ma-Team Sentiment"
+date: "2/7/2021"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    highlight: github
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+merged_data <- read_csv("merged_data.csv")
+Mydata<-merged_data %>% select(user_name,user_location,user_followers,date,text,hashtags) %>%
+  distinct(text, .keep_all = TRUE)
+```
+
+## 1. Clean the text column and hashtags
+```{r}
+# Get the text column
+text <- Mydata$text
+
+# Set the text to lowercase
+text <- tolower(text)
+text[c(0:5)]
+# Remove urls, hashtag,  mentions, emojis, extrawhite space
+temp <- gsub("https://.+", "", text)
+temp <- gsub("#\\w+", "", temp)
+temp <- gsub("@\\w+", "", temp)
+temp <- gsub("\\n", "", temp)
+temp <- gsub("amp", " ", temp)
+#remove all characters that are not (^) in the range \x20-\x7E (hex 0x20 to 0x7E)
+temp <- gsub("[^\x20-\x7E]", "", temp)
+
+temp <- gsub("[[:punct:]]", " ", temp)
+#remove extrawhite spaces
+temp <- gsub("\\s+"," ",temp)
+temp <- gsub("^\\s+", "", temp)
+
+temp[c(0:5)]
+
+Mydata$textnew<-temp #cleaned text column
+Mydata$textnew1<-strsplit(temp," ")
+
+
+```
+```{r}
+#Clean the hashtags
+temph <- gsub("\\[", "", Mydata$hashtags)
+temph <- gsub("\\]", "", temph)
+temph <- gsub("\'", "", temph)
+Mydata$hashtags1<-temph
+```
+
+
+## 2. Split into words, remove badwords
+
+```{r}
+library(tm)
+library(stringi)
+
+Remove_badwords<-function(x=Mydata$textnew)
+{
+  badwords<-c("the","a","all","but","more","out","were","was","you","are", "his","is","over","they","their","than","should", "i","after","on","to","into","them","re","ve","been","has","have","of","for","does","it","and","will","could","in","this","those","there","be","is","as","also","its","us","some","here","from","any","did","we","me","may","that","with","your","our","can","about","would","being","these","during","had","since","which","when","what","how","why","who","while","not","just")
+  
+  temp<-unique(x)
+  temp1<-unlist(strsplit(temp," "))
+  temp2<-removeWords(temp1, badwords)
+  word<-stri_omit_empty(temp2, na_empty = FALSE)
+  return(word)
+}
+
+allword<-Remove_badwords(Mydata$textnew)
+allword[c(0:20)]
+
+```
+
+### Most common positive and negative words
+```{r}
+library(tidytext)
+library(stringr)
+library(tidyr)
+bing <- get_sentiments("bing")
+tidy_books <- Mydata %>% unnest_tokens(word, textnew)
+
+bing_word_counts <- tidy_books %>%
+  inner_join(bing) %>%
+  count(word, sentiment, sort = TRUE)
+
+bing_word_counts %>%
+  filter(n > 600) %>%
+  mutate(n = ifelse(sentiment == "negative", -n, n)) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill = sentiment)) +
+  geom_col() +
+  coord_flip() +
+  labs(y = "Contribution to sentiment")
+
+
+```
+
+## 3. Get word freq and sentiment
+```{r}
+SA<-function(data)
+{
+  
+  #remove badword and get their freq
+  goodword<-Remove_badwords(data$textnew)
+  tf<-termFreq(goodword)
+  freq<-data.frame(fq=findMostFreqTerms(tf,n=1000))
+  wordfq<-tibble::rownames_to_column(freq, "word")
+
+  sentiment <- wordfq %>%
+      inner_join(get_sentiments("bing"))
+
+  positive<-sentiment %>% filter(sentiment == "positive") %>% filter(word!="trump")
+
+  negative<-sentiment %>% filter(sentiment == "negative")
+
+  Mywordcloud(wordfq,positive,negative)
+  return(nrow(positive)/nrow(sentiment))
+}
+```
+
+## 4. Wordcloud of sentiment
+```{r}
+#install.packages("wordcloud")
+library(wordcloud)
+Mywordcloud<-function(wordfq,positive,negative)
+{
+  wordcloud(words = wordfq$word, freq = wordfq$fq, max.words=100, random.order=FALSE, rot.per=0.15,colors=brewer.pal(8, "Dark2"))
+  wordcloud(words = positive$word, freq = positive$fq,max.words=100, random.order=FALSE, rot.per=0.15,colors=brewer.pal(8, "Dark2"))
+  wordcloud(words = negative$word, freq = negative$fq,max.words=100, random.order=FALSE, rot.per=0.15,colors=brewer.pal(8, "Dark2"))
+}
+```
+### Wordcloud of all words
+```{r}
+library(reshape2)
+
+Compare_Cloud<-function(data)
+{
+  data %>%
+  inner_join(bing) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#F8766D", "#00BFC4"),
+                   max.words = 100)
+}
+Compare_Cloud(tidy_books)
+
+
+
+```
+
+
+## 5. Sentiment of specific words
+### Trump Wordcloud
+```{r}
+library(tidytext)
+#"trump" %in%  Mydata$textnew1[[16]]=True
+trump_mask<-lapply(1:length(Mydata$textnew1),function(i)"trump" %in%  Mydata$textnew1[[i]]) %>% unlist()
+Trump<-Mydata[trump_mask,]
+Trump<-Trump %>% distinct(textnew,.keep_all = TRUE) %>% arrange(date) %>% slice(1:2513)
+
+SA(Trump)
+
+```
+
+### Trump Sentiment Mean Score over time
+```{r}
+library(sentimentr)
+Trump$score<-sentiment_by(get_sentences(Trump$textnew), by = NULL)[,4]
+
+meanscore<-data.frame("score"=tapply(unlist(Trump$score),unlist(as.Date(Trump$date)),mean))
+meanscore<-tibble::rownames_to_column(meanscore, "date")
+
+ggplot(meanscore, aes(x=unlist(as.Date(date)), y=unlist(score))) +
+  geom_line() + 
+  geom_point() + 
+  xlab("Date")+
+  ylab("Mean Sentiment Score")
+```
+
+### PfizerBioNTech Wordcloud
+```{r}
+Get_Specific<-function(column,key)
+{
+  mask<-lapply(1:length(column),function(i)key %in%  column[[i]]) %>% unlist()
+  return (mask)
+}
+Pfizer_mask<-Get_Specific(Mydata$textnew1,key="pfizer")
+Pfizer_mask1<-Get_Specific(Mydata$hashtags1,key="PfizerBioNTech")
+Pfizer_mask2<-Get_Specific(Mydata$hashtags1,key="Pfizer")
+Pfizer_mask3<-Get_Specific(Mydata$hashtags1,key="Pfizervaccine")
+x<-(Pfizer_mask|Pfizer_mask1)|(Pfizer_mask2|Pfizer_mask3)
+
+Pfizer<-Mydata[x,]
+SA(Pfizer)
+Pfizer<-Pfizer %>% distinct(textnew,.keep_all = TRUE)
+Pfizer1<-Pfizer %>% unnest_tokens(word, textnew)
+bing_word_counts <- Pfizer1 %>%
+  inner_join(bing) %>%
+  count(word, sentiment, sort = TRUE)
+
+bing_word_counts %>%
+  filter(n > 10) %>%
+  mutate(n = ifelse(sentiment == "negative", -n, n)) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill = sentiment)) +
+  geom_col() +
+  coord_flip() +
+  labs(y = "Contribution to sentiment")
+Compare_Cloud(Pfizer1)
+
+
+```
+
+### PfizerBioNTech Sentiment Mean Score over time
+```{r}
+library(sentimentr)
+Pfizer$score<-sentiment_by(get_sentences(Pfizer$textnew), by = NULL)[,4]
+
+meanscore<-data.frame("score"=tapply(unlist(Pfizer$score),unlist(as.Date(Pfizer$date)),mean))
+meanscore<-tibble::rownames_to_column(meanscore, "date")
+
+ggplot(meanscore, aes(x=unlist(as.Date(date)), y=unlist(score))) +
+  geom_line() + 
+  geom_point() + 
+  xlab("Date")+
+  ylab("Mean Sentiment Score")
+```
+
+```{r}
+#character limit=115
+length(unlist(strsplit("while the world has been on the wrong side of history this year, hopefully, the biggest vaccination effort we've ev",split="")))
+#https://developer.twitter.com/en/docs/twitter-api/early-access
+#https://towardsdatascience.com/setting-up-twitter-for-text-mining-in-r-bcfc5ba910f4
+
+```
+
+## 6. Sentiment score of all words
+```{r}
+Mydata$score<-sentiment_by(get_sentences(Mydata$textnew), by = NULL)[,4]
+
+meanscore<-data.frame("score"=tapply(unlist(Mydata$score),unlist(as.Date(Mydata$date)),mean))
+meanscore<-tibble::rownames_to_column(meanscore, "date")
+
+ggplot(meanscore, aes(x=unlist(as.Date(date)), y=unlist(score))) +
+  geom_line() + 
+  geom_point() + 
+  xlab("Date")+
+  ylab("Mean Sentiment Score")
+```
+
+## 7. Clean location data
+```{r}
+Myloc<-Mydata %>% na.omit(user_location) #No NA location in Myloc
+loc <- Myloc$user_location
+loc[c(0:40)]
+loctemp <- gsub("[^\x20-\x7E]", "", loc)
+loctemp <- gsub("[[:punct:]]", " ", loctemp)
+loctemp <- gsub("\\s+"," ",loctemp)
+loctemp[c(0:40)]
+
+Myloc$newloc<-loctemp
+```
